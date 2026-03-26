@@ -8,63 +8,92 @@ import java.util.concurrent.TimeUnit
 
 class AiProcessor {
 
+    // 🔹 API interface (jisse hum AI server se baat karenge)
     private val api: AiApi
 
     init {
+
+        // 🔥 OkHttpClient → ye network handle karta hai
+        // yaha hum timeout increase kar rahe hai kyuki AI response slow hota hai
         val client = OkHttpClient.Builder()
-            .connectTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
+            .connectTimeout(60, TimeUnit.SECONDS)   // connection ke liye max wait
+            .readTimeout(60, TimeUnit.SECONDS)      // response read karne ke liye wait
+            .writeTimeout(60, TimeUnit.SECONDS)     // data bhejne ke liye wait
             .build()
 
+        // 🔥 Retrofit → API call banane ke liye use hota hai
         val retrofit = Retrofit.Builder()
-            .baseUrl("http://10.0.2.2:11434/")
-            .client(client)
-            .addConverterFactory(GsonConverterFactory.create()) // safe to keep
+            .baseUrl("http://10.0.2.2:11434/")  // ⚠️ emulator → localhost mapping
+            .client(client)                    // upar wala client use hoga
+            .addConverterFactory(GsonConverterFactory.create()) // request JSON me convert
             .build()
 
+        // 🔹 Api interface ko real object me convert kar diya
         api = retrofit.create(AiApi::class.java)
     }
 
-    suspend fun processNote(input: String): String {
+    // 🔥 Ye main function hai jo AI se baat karta hai
+    // return type = Pair<summary, tags>
+    suspend fun processNote(input: String): Pair<String, String> {
         return try {
 
+            // 🔥 API CALL → yaha AI ko request bhej rahe hai
             val response: ResponseBody = api.generate(
                 OllamaRequest(
-                    model = "phi3",
-                    prompt =  """
-Summarize the note in 2 lines max.
+                    model = "phi3",   // kaunsa AI model use karna hai
+                    prompt = """
+You are a strict AI.
 
-Then generate exactly 3 short tags.
+TASK:
+- Summarize in 2 lines max
+- Generate exactly 3 tags
 
-Rules:
-- Tags must be single words
-- No sentences
+RULES:
+- No extra text
 - No hashtags
-- No explanations
+- Tags = single words
+- lowercase only
 
-Note:
-$input
-
-Output format:
+FORMAT:
 Summary: ...
 Tags: tag1, tag2, tag3
+
+NOTE:
+$input
 """.trimIndent(),
-                    stream = false
+                    stream = false   // 🔥 full response ek baar me chahiye
                 )
             )
 
+            // 🔥 Raw response milta hai (JSON + extra data)
             val raw = response.string()
 
-            // 🔥 CLEAN AI TEXT (IMPORTANT)
+            // 🧠 Yaha hum JSON ke andar se sirf actual AI text nikal rahe hai
             val clean = raw
-                .substringAfter("\"response\":\"")
-                .substringBefore("\",\"done\"")
+                .substringAfter("\"response\":\"")   // response ke baad ka text
+                .substringBefore("\",\"done\"")      // done ke pehle tak cut
 
-            clean
+            // 🔥 Ab hum clean text ko split karenge
+
+            // 🟢 Summary nikalna
+            val summary = clean
+                .substringAfter("Summary:")   // Summary ke baad ka text
+                .substringBefore("Tags:")     // Tags ke pehle tak
+                .trim()
+
+            // 🟢 Tags nikalna
+            val tags = clean
+                .substringAfter("Tags:")  // Tags ke baad ka text
+                .trim()
+
+            // 🔥 Final output → Pair me return
+            Pair(summary, tags)
 
         } catch (e: Exception) {
-            "AI Error: ${e.message}"
+
+            // ❌ agar error aaya (network ya AI fail)
+            // fallback return karte hai
+            Pair("Error generating summary", "error")
         }
     }
 }
